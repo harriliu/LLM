@@ -1,8 +1,4 @@
-* Run ElasticSearch with Docker
-* Index the documents
-* Replace MinSearch with ElasticSearch
-
-Running ElasticSearch:
+Running ElasticSearch via Docker:
 
 ```bash
 docker run -it \

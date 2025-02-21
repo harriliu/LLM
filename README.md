@@ -1,4 +1,5 @@
-# LLM Projects Repository
+# LLM Projects Repository 
+The Infinite Monkey Theorem (but with code)
 
 # 1. RAG (Retrieval Augmented Generation)
 [Link to my notebook](https://github.com/harriliu/LLM/blob/main/llm_projects/rag.ipynb)

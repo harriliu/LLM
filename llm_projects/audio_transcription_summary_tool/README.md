@@ -2,7 +2,7 @@
 
 A powerful application that automatically transcribes speech from audio files and generates concise summaries of the content, deployed on Hugging Face Spaces.
 
-![Demo Image](https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/gradio-banner.png)
+![Hugging Face](https://huggingface.co/datasets/huggingface/brand-assets/resolve/main/hf-logo.svg)
 
 ## Overview
 

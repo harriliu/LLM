@@ -55,7 +55,7 @@ If you want to run this application locally:
 1. Clone the repository:
 ```bash
 git clone https://huggingface.co/spaces/harriliu1129/meeting_minutes_summarizer
-cd ameeting_minutes_summarizer
+cd meeting_minutes_summarizer
 ```
 
 2. Install dependencies:

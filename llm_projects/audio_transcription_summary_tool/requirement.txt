@@ -1,0 +1,9 @@
+gradio==3.50.2
+transformers==4.38.0
+torch>=2.0.0
+whisper>=20231117
+sentencepiece>=0.1.99
+accelerate>=0.25.0
+numpy>=1.20.0
+# Optional but recommended for better performance
+# faster-whisper>=0.9.0

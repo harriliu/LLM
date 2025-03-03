@@ -6,91 +6,66 @@ import subprocess
 import sys
 import platform
 
+# Set environment variables for better compatibility
+os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"  # Enable MPS fallback for operations that support it
+os.environ["TOKENIZERS_PARALLELISM"] = "false"   # Avoid warnings
+
+# Import torch first to check availability
+try:
+    import torch
+    print(f"PyTorch version: {torch.__version__}")
+except ImportError:
+    print("Installing PyTorch...")
+    subprocess.run([sys.executable, '-m', 'pip', 'install', 'torch'])
+    import torch
+
+# Now import other dependencies
+import whisper
+from transformers import pipeline
+
 # Check for audio processing tools
 def check_audio_tools():
-    # Try to find ffmpeg first (most common)
+    # Try to find ffmpeg first (should be pre-installed on Spaces)
     try:
         subprocess.run(['ffmpeg', '-version'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         print("ffmpeg is installed! Using ffmpeg for audio processing.")
         return "ffmpeg"
     except FileNotFoundError:
-        # Try libav (avconv) as an alternative
+        # Try other alternatives
         try:
             subprocess.run(['avconv', '-version'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             print("avconv (libav) is installed! Using libav for audio processing.")
             return "libav"
         except FileNotFoundError:
-            # Try SoX as another alternative
             try:
                 subprocess.run(['sox', '--version'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 print("SoX is installed! Using SoX for audio processing.")
                 return "sox"
             except FileNotFoundError:
-                print("No audio processing tools found. Please install one of the following:")
-                print("- ffmpeg (recommended): brew install ffmpeg")
-                print("- libav: brew install libav")
-                print("- SoX: brew install sox")
-                print("\nWould you like to continue without audio tools? Some functionality may be limited.")
-                response = input("Continue anyway? (y/n): ")
-                if response.lower() != 'y':
-                    sys.exit(1)
+                print("No audio processing tools found. Some functionality may be limited.")
                 return "none"
 
 # Check for required packages and install if missing
 def check_and_install_packages():
-    required_packages = ['whisper', 'transformers', 'torch', 'sentencepiece', 'accelerate']
-    
-    # For M1 Macs, ensure PyTorch is installed with MPS support
-    if platform.processor() == 'arm' and sys.platform == 'darwin':
-        print("M1/M2 Mac detected - ensuring PyTorch with MPS support is installed...")
-        try:
-            import torch
-            if not torch.backends.mps.is_available():
-                print("PyTorch MPS is not available. Installing PyTorch with MPS support...")
-                subprocess.run([sys.executable, '-m', 'pip', 'install', '--upgrade', 'torch'])
-        except (ImportError, AttributeError):
-            print("Installing PyTorch with MPS support...")
-            subprocess.run([sys.executable, '-m', 'pip', 'install', '--upgrade', 'torch'])
+    required_packages = ['whisper', 'transformers', 'sentencepiece', 'accelerate']
     
     for package in required_packages:
         try:
             __import__(package)
         except ImportError:
             print(f"{package} not found. Installing...")
-            if package == 'torch' and platform.processor() == 'arm' and sys.platform == 'darwin':
-                # Skip if we already handled torch for M1
-                continue
             subprocess.run([sys.executable, '-m', 'pip', 'install', package])
 
-# Run checks
-audio_tool = check_audio_tools()
-check_and_install_packages()
+# Force CPU mode for Spaces to ensure compatibility
+device = "cpu"  
+print("Using CPU mode for all models to ensure compatibility")
 
-# Now import after checks
-import torch
-import whisper
-from transformers import pipeline
-
-# Force CPU-only mode to avoid MPS sparse tensor issues
-os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"  # Enable MPS fallback for operations that support it
-device = "cpu"  # Force CPU for all models
-print("Using CPU mode for all models to ensure compatibility on Apple Silicon")
-
-# Check for PyTorch installation
-try:
-    import torch
-    print(f"PyTorch version: {torch.__version__}")
-except ImportError:
-    print("PyTorch not found. Installing...")
-    subprocess.run([sys.executable, '-m', 'pip', 'install', 'torch'])
-
-
-# Try to use faster-whisper which works better on M1 Macs with CPU
+# Try to use faster-whisper if available
 try:
     from faster_whisper import WhisperModel
-    print("Using faster-whisper for improved performance on CPU!")
+    print("Using faster-whisper for improved performance!")
     
-    # Always use CPU with int8 quantization (most reliable on M1)
+    # Configure for best stability on Spaces
     model = WhisperModel("small", device="cpu", compute_type="int8", cpu_threads=4)
     use_faster_whisper = True
     print("Loaded faster-whisper model with optimized CPU settings")
@@ -109,30 +84,26 @@ except (ImportError, ValueError) as e:
             use_faster_whisper = False
     else:
         print("faster-whisper not found. Using standard whisper.")
-        print("For better performance on M1/M2 Mac, consider:")
-        print("pip install faster-whisper")
         use_faster_whisper = False
 
 # Load standard whisper as fallback
 if not use_faster_whisper:
     try:
-        # Ensure we use tiny model which has fewer parameters and is less likely 
-        # to hit compatibility issues
-        print("Loading Whisper tiny model on CPU...")
-        model = whisper.load_model("tiny", device="cpu")
-        print("Whisper tiny model loaded successfully!")
+        # Use small model for better results but with reasonable resource usage
+        print("Loading Whisper small model on CPU...")
+        model = whisper.load_model("small", device="cpu")
+        print("Whisper small model loaded successfully!")
     except Exception as e:
         print(f"Error loading standard whisper model: {str(e)}")
-        print("Trying with environment variable workarounds...")
-        # Last resort - use environment variables and minimal model
-        os.environ["TOKENIZERS_PARALLELISM"] = "false"
-        model = whisper.load_model("tiny", device="cpu", download_root=os.path.expanduser("~/.cache/whisper"))
+        print("Trying with tiny model as fallback...")
+        # Last resort - use tiny model which has fewer parameters
+        model = whisper.load_model("tiny", device="cpu")
         print("Whisper tiny model loaded with fallback configuration!")
 
-# Load a lightweight summarization model
+# Load summarization model
 print("Loading summarization model...")
 try:
-    # Use a smaller model for better compatibility
+    # Use a relatively small model for Spaces
     summarizer = pipeline("summarization", model="facebook/bart-large-cnn", device=-1)
     print("Summarization model loaded!")
 except Exception as e:
@@ -154,9 +125,11 @@ except Exception as e:
         summarizer = dummy_summarize
         print("Using basic text truncation as summarization fallback!")
 
+# Detect the audio tool once at startup
+audio_tool = check_audio_tools()
+
 def transcribe_and_summarize(audio_file):
     start_time = time.time()
-    global model  # Use global instead of nonlocal
     
     # Step 1: Check if audio file was uploaded
     if audio_file is None:
@@ -200,12 +173,9 @@ def transcribe_and_summarize(audio_file):
             except RuntimeError as e:
                 if "cuda" in str(e).lower() or "mps" in str(e).lower():
                     print("GPU error detected. Forcing CPU mode and retrying...")
-                    # Force CPU mode if GPU fails
-                    os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
-                    os.environ["CUDA_VISIBLE_DEVICES"] = ""
-                    # Reload model on CPU if needed
-                    model = whisper.load_model("tiny", device="cpu")
-                    result = model.transcribe(processed_audio)
+                    # Force CPU mode if GPU fails - use a different variable name to avoid confusion
+                    fallback_model = whisper.load_model("tiny", device="cpu")
+                    result = fallback_model.transcribe(processed_audio)
                     transcript = result["text"]
                 else:
                     raise
@@ -225,7 +195,7 @@ def transcribe_and_summarize(audio_file):
         except:
             pass
     
-    # Step 3: Summarize the transcript
+    # Step 4: Summarize the transcript
     summarize_start = time.time()
     
     # Function to chunk text for summarization
@@ -284,15 +254,16 @@ def transcribe_and_summarize(audio_file):
 
 # Create Gradio interface
 with gr.Blocks(title="Audio Transcription & Summarization") as demo:
-    gr.Markdown("# Audio Transcription & Summarization Tool")
-    gr.Markdown("Upload an audio file to transcribe and summarize its content.")
+    gr.Markdown("# 🎙️ Audio Transcription & Summarization Tool")
+    gr.Markdown("Upload an audio file or record directly to transcribe and summarize its content.")
     
-    # Add device and audio tool info
-    if use_faster_whisper:
-        gr.Markdown(f"**Running on:** {platform.processor()} with faster-whisper on CPU")
-    else:
-        gr.Markdown(f"**Running on:** {platform.processor()} using standard whisper on CPU")
-    gr.Markdown(f"**Audio processing:** Using {audio_tool}")
+    # Add environment info
+    with gr.Accordion("Environment Info", open=False):
+        if use_faster_whisper:
+            gr.Markdown(f"**Model**: faster-whisper (small)")
+        else:
+            gr.Markdown(f"**Model**: standard whisper ({model.model.dims.n_text_ctx}-ctx)")
+        gr.Markdown(f"**Audio processing**: Using {audio_tool}")
     
     # Add error message display
     error_output = gr.Textbox(label="Status", visible=True)
@@ -316,10 +287,7 @@ with gr.Blocks(title="Audio Transcription & Summarization") as demo:
         except Exception as e:
             error_msg = f"Error: {str(e)}"
             if "ffmpeg" in str(e).lower() or "audio" in str(e).lower():
-                error_msg += "\n\nPlease install an audio processing tool:\n"
-                error_msg += "- ffmpeg: brew install ffmpeg\n"
-                error_msg += "- libav: brew install libav\n" 
-                error_msg += "- SoX: brew install sox"
+                error_msg += "\n\nAudio processing error. Please try a different audio format."
             return error_msg, "", "", 0
     
     submit_btn.click(
@@ -330,40 +298,22 @@ with gr.Blocks(title="Audio Transcription & Summarization") as demo:
     
     gr.Markdown("### How to Use")
     gr.Markdown("""
-    1. Upload an audio file (mp3, wav, m4a, etc.)
+    1. Upload an audio file (mp3, wav, m4a, etc.) or record directly
     2. Click the 'Transcribe & Summarize' button
     3. Wait for processing (time depends on audio length)
-    4. View the transcript and summary
+    4. View the transcript and summary results
     
-    This app uses OpenAI's Whisper (small model) for transcription and BART-large-CNN for summarization.
+    This app uses Whisper for transcription and BART-CNN for summarization.
     """)
 
-# Setup function
-def setup():
-    """Install necessary dependencies before launching the app"""
-    # Check for audio processing tools
-    global audio_tool
-    
-    print("\nChecking for audio processing tools...")
-    if audio_tool == "none":
-        print("\nNO AUDIO PROCESSING TOOLS FOUND")
-        print("This application works best with one of these tools:")
-        print("- ffmpeg (recommended): brew install ffmpeg")
-        print("- libav: brew install libav")
-        print("- SoX: brew install sox")
-        
-        # Ask if user wants to continue anyway
-        response = input("\nContinue anyway? Some functionality may be limited. (y/n): ")
-        if response.lower() != 'y':
-            sys.exit(1)
-    else:
-        print(f"Found {audio_tool} for audio processing.")
+    gr.Markdown("### Limitations")
+    gr.Markdown("""
+    - For best results, use clear audio with minimal background noise
+    - Processing long audio files may take more time
+    - Maximum audio length is limited by system resources
+    - Audio files with multiple speakers may have reduced accuracy
+    """)
 
 # Launch the app
 if __name__ == "__main__":
-    setup()
-    print("\ntarting Voice-to-Text Application...")
-    print(f"Running on {platform.processor()} with {device.upper()} acceleration")
-    print("Loading models (this may take a moment)...")
-    print("Once loaded, the application will be available at http://127.0.0.1:7860")
-    demo.launch(share=False)  # Set share=True if you want a public link
+    demo.launch()

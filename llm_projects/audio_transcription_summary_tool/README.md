@@ -4,6 +4,8 @@ A powerful application that automatically transcribes speech from audio files an
 
 ![Hugging Face](https://huggingface.co/datasets/huggingface/brand-assets/resolve/main/hf-logo.svg)
 
+[DEMO on Hugging Face Space](https://huggingface.co/spaces/harriliu1129/meeting_minutes_summarizer)
+
 ## Overview
 
 This app allows you to:
@@ -86,4 +88,3 @@ When running locally on Apple Silicon Macs, the application includes optimizatio
 - [Gradio](https://github.com/gradio-app/gradio) for the web interface framework
 
 ---
-[Fork this Space](https://huggingface.co/spaces/harriliu1129/meeting_minutes_summarizer)) 
